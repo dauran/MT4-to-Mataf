@@ -661,7 +661,7 @@ string CreateTradesListJson(const bool firstRun)
      {
       if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
       if(OrderSymbol()=="" || OrderSymbol()==NULL) continue;
-      if(!firstRun){if(OrderCloseTime()<today) break;}
+      if(!firstRun){if(OrderCloseTime()<today) continue;}
       //if(OrderType()>OP_SELL) continue;
 
       if(x++>0)json+=",";
