@@ -3,7 +3,7 @@
 //|       This software is licensed under the Apache License, Version 2.0 |
 //|   which can be obtained at http://www.apache.org/licenses/LICENSE-2.0 |
 //|                                                                       |
-//|                                          Developed by Lakshan Perera: |
+//|                             version 1.00 developed by Lakshan Perera: |
 //|         https://www.upwork.com/o/profiles/users/_~0117e7a3d2ba0ba25e/ |
 //|                                                                       |
 //|                                             Documentation of the API: |
@@ -15,7 +15,7 @@
 //+-----------------------------------------------------------------------+
 #property copyright "Mataf.net"
 #property link      "https://www.mataf.net"
-#property version   "1.00"
+#property version   "1.01"
 #property strict
 #include "JAson.mqh"
 #include <WinUser32.mqh>
@@ -37,6 +37,7 @@ input string      AccountAlias="Test Account";
 
 string token="";
 int id_user;
+int api_version=1;
 int AccountID;
 string settings_file="";
 CJAVal settingsFileParser;
@@ -96,7 +97,7 @@ void OnTimer()
 int ApiOnInit()
   {
    Comment("Gettting the token...");
-   LoadSettings();
+   GetToken();
 
    Sleep(300);
    Comment("Creating an account...");
@@ -110,7 +111,8 @@ int ApiOnInit()
          return(INIT_FAILED);
         }
      }
-   else Comment("Account created!...");
+   else
+      Comment("Account created!...");
    Sleep(500);
 
 //Alert("Connected!");
@@ -120,29 +122,6 @@ int ApiOnInit()
 //OnTickSimulated();
    connected=true;
    return(INIT_SUCCEEDED);
-  }
-//+------------------------------------------------------------------+
-//| Update Historical Orders Once Per Day                            |
-//+------------------------------------------------------------------+
-string UpdateCacheHistory(const datetime today)
-  {
-   double units;
-   int x=0;
-   static string jsonH="";
-
-   for(int i=OrdersHistoryTotal()-1;i>=0;i--)
-     {
-      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
-      if(OrderCloseTime()>=today) break;
-      if(OrderType()>OP_SELL) continue;
-
-      if(x>0)jsonH+=",";
-      units=OrderLots()*MarketInfo(OrderSymbol(),MODE_LOTSIZE);
-      jsonH+=CreateTradeObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),OrderClosePrice(),OrderProfit(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),
-                                   OrderOpenTime(),OrderCloseTime(),OrderCommission(),OrderSwap(),0);
-      x++;
-     }
-   return(jsonH);
   }
 //+------------------------------------------------------------------+
 //| Send request at given frequency                                  |
@@ -164,29 +143,6 @@ void OnTickSimulated()
    previous_finished=true;
   }
 //+------------------------------------------------------------------+
-//| Load settings: Token, id_user and AccountID from file            |
-//+------------------------------------------------------------------+
-void LoadSettings()
-  {
-   if(FileIsExist(token_file_name))
-     {
-      int handle=FileOpen(token_file_name,FILE_READ|FILE_TXT);
-      settings_file=FileReadString(handle);
-      FileClose(handle);
-      Print("Settings file is loaded!");
-
-      if(settingsFileParser.Deserialize(settings_file))
-        {
-         token=settingsFileParser["token"].ToStr();
-         id_user=(int)settingsFileParser["id_user"].ToInt();
-         AccountID=(int)settingsFileParser["AccountID"].ToInt();
-
-         if(AccountID<=0 || id_user<=0 || token=="") GetToken();
-        }
-     }
-   else GetToken();
-  }
-//+------------------------------------------------------------------+
 //| Save token, id_user and AccountID onto the settings file         |
 //+------------------------------------------------------------------+
 void SaveSettings()
@@ -195,7 +151,7 @@ void SaveSettings()
    FileWriteString(handle,settings_file);
    FileFlush(handle);
    FileClose(handle);
-   Print("Settings saved to file");
+   Print("Token and id_user saved to file");
   }
 //+------------------------------------------------------------------+
 //| Get new token                                                    |
@@ -204,32 +160,30 @@ bool GetToken()
   {
    CJAVal parser(NULL,jtUNDEF);
    string fullUrl = url+"/api/user/login";
-   string headers = "Content-Type: application/json\r\n X-Mataf-api-version: 1\r\n";
+   string headers = StringFormat("Content-Type: application/json\r\n X-Mataf-api-version: %d\r\n",api_version);
+   string str;
    char data[];
-   string str="{"
-              +GetLine("email",email)
-              +GetLine("password",password,true)
-              +"\r\n}";
 
-   StringToCharArray(str,data,0,StringLen(str),CP_UTF8);
+   parser["email"]=email;
+   parser["password"]=password;
+   parser.Serialize(str);
+
+   ArrayResize(data,StringToCharArray(str,data,0,-1,CP_UTF8)-1);
    int result=WebRequest("POST",fullUrl,headers,api_call_timeout,data,data,headers);
-   Print("Result is "+(string)result+": "+(string)GetLastError());
 
    if(parser.Deserialize(data))
      {
       token=parser["data"]["token"].ToStr();
-
      }
    else
      {
-      Print("Failed to Deserialize");
+      Print("Failed to get Token from API");
       return(false);
      }
 
    id_user=(int)parser["data"]["id_user"].ToInt();
 
-   Print("New Token: "+token);
-   Print("id_user: ",id_user);
+//Print("New Token stored for id_user=",id_user);
 
    settingsFileParser["token"]=token;
    settingsFileParser["id_user"]=id_user;
@@ -246,7 +200,7 @@ bool RefreshToken()
   {
    CJAVal parser(NULL,jtUNDEF);
    string fullUrl=url+"/api/user/refreshToken";
-   string headers= StringFormat("Content-Type: application/json\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-Mataf-api-version: 1",token,id_user);
+   string headers= StringFormat("Content-Type: application/json\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-Mataf-api-version: %d",token,id_user,api_version);
 
    char data[];
    string str="";
@@ -255,7 +209,7 @@ bool RefreshToken()
    parser["token"]=token;
    parser.Serialize(str);
 
-   StringToCharArray(str,data,0,StringLen(str),CP_UTF8);
+   ArrayResize(data,StringToCharArray(str,data,0,-1,CP_UTF8)-1);
    int result=WebRequest("POST",fullUrl,headers,api_call_timeout,data,data,headers);
    Print("Result is "+(string)result+": "+(string)GetLastError());
 
@@ -289,7 +243,7 @@ bool CreateAccount(const bool firstRun=true)
   {
    CJAVal parser(NULL,jtUNDEF);
    string fullUrl=url+"/api/trading/accounts";
-   string headers= StringFormat("Content-Type: application/json\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-Mataf-api-version: 1",token,id_user);
+   string headers= StringFormat("Content-Type: application/json\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-Mataf-api-version: %d",token,id_user,api_version);
 
    char data[];
    string str="";
@@ -302,83 +256,62 @@ bool CreateAccount(const bool firstRun=true)
       SendMessageA(hwindow,WM_COMMAND,33058,0);
      }
 
-   for(int i=OrdersHistoryTotal()-1;i>=0;i--)
+   for(int i=OrdersHistoryTotal()-1; i>=0; i--)
      {
       Sleep(500);
-      if(!OrderSelect(0,SELECT_BY_POS,MODE_HISTORY)) continue;
-      if(OrderType()!=6) continue;
+      if(!OrderSelect(0,SELECT_BY_POS,MODE_HISTORY))
+         continue;
+      if(OrderType()!=6)
+         continue;
       created_time=TimeToString(OrderCloseTime(),TIME_SECONDS|TIME_DATE);
 
       break;
      }
 
    double total_deposits=0,total_withdraw=0;
-   string acountdepositsObject="";
+   CJAVal acountdepositsObject(NULL,jtUNDEF);
 
-   for(int i=OrdersHistoryTotal()-1;i>=0;i--)
+   int j=0;
+   for(int i=OrdersHistoryTotal()-1; i>=0; i--)
      {
-      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
-      if(OrderType()!=6) continue;
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
+         continue;
+      if(OrderType()!=6)
+         continue;
       if(OrderProfit()>0)
         {
-         total_deposits+=OrderProfit();
-         acountdepositsObject+=CreateAccountTransactionJson("FUNDING",OrderProfit(),OrderOpenTime(),OrderTicket(),OrderComment());
+         total_deposits           += OrderProfit();
+         acountdepositsObject[j++] = CreateAccountTransactionJson("FUNDING",OrderProfit(),OrderOpenTime(),OrderTicket(),OrderComment());
         }
       else
         {
-         total_withdraw+=MathAbs(OrderProfit());
-         acountdepositsObject+=CreateAccountTransactionJson("WITHDRAW",OrderProfit(),OrderOpenTime(),OrderTicket(),OrderComment());
+         total_withdraw           += MathAbs(OrderProfit());
+         acountdepositsObject[j++] = CreateAccountTransactionJson("WITHDRAW",OrderProfit(),OrderOpenTime(),OrderTicket(),OrderComment());
         }
-      if(i!=0)acountdepositsObject+=",";
      }
 
-   string AccountJson="{"
-                      +GetLine("account_id_from_provider",(string)AccountNumber())
-                      +GetLine("provider_name",AccountCompany())
-                      +GetLine("source_name","MT4")
-                      +GetLine("user_id_from_provider",(string)AccountNumber())
-                      +GetLine("account_alias",AccountAlias)
-                      +GetLine("account_name",AccountName())
-                      +GetLine("currency",AccountCurrency())
-                      +GetLine("is_live",!IsDemo())
-                      +GetLine("is_active",true)
-                      +GetLine("balance",(float)AccountBalance())
-                      +GetLine("profit_loss",AccountBalance()-(total_deposits-total_withdraw))
-                      +GetLine("open_profit_loss",AccountProfit())
-                      +"\"funds\":"
-                      +"{"
-                      +GetLine("deposit",total_deposits)
-                      +GetLine("withdraw",-1*total_withdraw)
-                      +"\"history\":"
-                      +"["
-                      +acountdepositsObject
-                      +"]"
-                      +"},"
-                      //+GetLine("rollover",0)
-                      //+GetLine("commission",0)
-                      //+GetLine("other_fees",0)
-                      +GetLine("created_at_from_provider",created_time,true)
-                      +"}";
+   parser["version"]                          = api_version;
+   parser["data"]["account_id_from_provider"] = (string)AccountNumber();
+   parser["data"]["provider_name"]            = AccountCompany();
+   parser["data"]["source_name"]              = "MT4";
+   parser["data"]["user_id_from_provider"]    = (string)AccountNumber();
+   parser["data"]["account_alias"]            = AccountAlias;
+   parser["data"]["account_name"]             = AccountName();
+   parser["data"]["currency"]                 = AccountCurrency();
+   parser["data"]["is_live"]                  = !IsDemo();
+   parser["data"]["is_active"]                = true;
+   parser["data"]["balance"]                  = (float)AccountBalance();
+   parser["data"]["profit_loss"]              = AccountBalance()-(total_deposits-total_withdraw);
+   parser["data"]["open_profit_loss"]         = AccountProfit();
+   parser["data"]["funds"]["deposit"]         = total_deposits;
+   parser["data"]["funds"]["withdraw"]        = -1*total_withdraw;
+   parser["data"]["history"]                  = acountdepositsObject;
+   parser["data"]["created_at_from_provider"] = created_time;
 
-   str="{"
-       +GetLine("version",1)
-       +"\"data\":"+AccountJson
-       +"}";
+   parser.Serialize(str);
 
-//--- save the json to a file
-   if(firstRun)
-     {
-      int handle=FileOpen(__FUNCTION__+".json",FILE_WRITE|FILE_TXT|FILE_SHARE_READ);
-      FileWriteString(handle,str);
-      FileClose(handle);
-      //     return(true);
-     }
-//--- end saving
-
-   StringToCharArray(str,data,0,StringLen(str),CP_UTF8);
+   ArrayResize(data,StringToCharArray(str,data,0,-1,CP_UTF8)-1);
    int result=WebRequest("POST",fullUrl,headers,api_call_timeout,data,data,headers);
-   if(firstRun)Print("Result is "+(string)result+": "+(string)GetLastError());
-   if(result!=200)return(false);
 
    if(parser.Deserialize(data))
      {
@@ -390,7 +323,8 @@ bool CreateAccount(const bool firstRun=true)
       else
         {
          AccountID=(int)parser["data"]["id"].ToInt();
-         if(firstRun)PrintFormat("Account Created successfully, Account ID: %d",AccountID);
+         if(firstRun)
+            PrintFormat("Account Created successfully, Account ID: %d",AccountID);
         }
      }
    else
@@ -401,7 +335,8 @@ bool CreateAccount(const bool firstRun=true)
 
    settingsFileParser["AccountID"]=AccountID;
    settings_file=settingsFileParser.Serialize();
-   if(firstRun)SaveSettings();
+   if(firstRun)
+      SaveSettings();
 
    return(true);
   }
@@ -412,12 +347,17 @@ bool UpdateOrderList()
   {
    CJAVal parser(NULL,jtUNDEF);
    string fullUrl=url+"/api/trading/accounts/"+(string)AccountID+"/orders";
-   string headers= StringFormat("Content-Type: application/json\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-Mataf-api-version: 1\r\n X-HTTP-Method-Override: PUT",token,id_user);
+   string headers= StringFormat("Content-Type: application/json\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-Mataf-api-version: %d\r\n X-HTTP-Method-Override: PUT",token,id_user,api_version);
    char data[];
-   string str=CreateOpenedOrderListJson();
-   if(str=="" || str==NULL) return(true);
-   StringToCharArray(str,data,0,StringLen(str),CP_UTF8);
+   string str;
 
+   parser = CreateOpenedOrderListJson();
+   parser.Serialize(str);
+
+   /*if(parser["data"]=="" || parser["data"]==NULL)
+      return(true);*/
+
+   ArrayResize(data,StringToCharArray(str,data,0,-1,CP_UTF8)-1);
    int result=WebRequest("POST",fullUrl,headers,api_call_timeout,data,data,headers);
 
    int error= GetLastError();
@@ -429,7 +369,6 @@ bool UpdateOrderList()
       if(parser["is_error"].ToBool())
         {
          PrintFormat("Error When Updating Order List: %s [ status code: %d ] ",parser["status"].ToStr(),parser["status_code"].ToInt());
-         Print("Token: ",token);
          Print("AccountID: ",AccountID);
          Print("id_user: ",id_user);
          return(false);
@@ -443,28 +382,22 @@ bool UpdateOrderList()
 //+------------------------------------------------------------------+
 //| Update Trades List                                                |
 //+------------------------------------------------------------------+
-bool UpdateTradesList(const bool firsRun=false)
+bool UpdateTradesList(const bool firstRun=false)
   {
    CJAVal parser(NULL,jtUNDEF);
    string fullUrl=url+"/api/trading/accounts/"+(string)AccountID+"/trades";
-   string headers= StringFormat("Content-Type: application/json\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-Mataf-api-version: 1\r\n X-HTTP-Method-Override: PUT",token,id_user);
-//Print("headers: ",headers);
+   string headers= StringFormat("Content-Type: application/json\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-Mataf-api-version: %d\r\n X-HTTP-Method-Override: PUT",token,id_user,api_version);
+
    char data[];
-   string str=CreateTradesListJson(firsRun);
+   string str;
 
-   if(str=="" || str==NULL) return(true);
-//--- save the json to a file
-   if(firsRun)
-     {
-      int handle=FileOpen("UpdateTradesListOnFirstRun.json",FILE_WRITE|FILE_TXT|FILE_SHARE_READ);
-      FileWriteString(handle,str);
-      FileClose(handle);
-      //     return(true);
-     }
-//--- end saving
+   parser = CreateTradesListJson(firstRun);
+   parser.Serialize(str);
 
-   StringToCharArray(str,data,0,StringLen(str),CP_UTF8);
+   if(!firstRun && (parser["data"]=="" || parser["data"]==NULL))
+      return(true);
 
+   ArrayResize(data,StringToCharArray(str,data,0,-1,CP_UTF8)-1);
    int result=WebRequest("POST",fullUrl,headers,api_call_timeout,data,data,headers);
 
    int error= GetLastError();
@@ -475,7 +408,6 @@ bool UpdateTradesList(const bool firsRun=false)
       if(parser["is_error"].ToBool())
         {
          PrintFormat("Error When Updating Trades List: %s [ status code: %d ] ",parser["status"].ToStr(),parser["status_code"].ToInt());
-         Print("Token: ",token);
          Print("AccountID: ",AccountID);
          Print("id_user: ",id_user);
          return(false);
@@ -495,185 +427,183 @@ bool UpdateTradesList(const bool firsRun=false)
 //+------------------------------------------------------------------+
 datetime GetLastActiveTimeStamp()
   {
-
    return(0);
   }
 //+------------------------------------------------------------------+
-//| Easier JSON Parser by line (key:value pair)                      |
+//| Create Withdrawing and Depositing JSON Data Object               |
 //+------------------------------------------------------------------+
-template<typename T>
-string GetLine(const string key,const T value,const bool lastline=false)
+CJAVal CreateAccountTransactionJson(const string method,const double amount,const datetime time,const int id,const string comment)
   {
-   if(typename(T)=="string")return(lastline?"\t\r\n\""+key+"\":"+"\""+(string)value+"\"":"\t\r\n\""+key+"\":"+"\""+(string)value+"\",");
-   else return(lastline?"\t\r\n\""+key+"\":"+(string)value:"\t\r\n\""+key+"\":"+(string)value+",");
+   CJAVal parser(NULL,jtUNDEF);
+   parser["type"]=method;
+   parser["amount"]=amount;
+   parser["time"]=TimeToString(time,TIME_SECONDS|TIME_DATE);
+   parser["transaction_id_from_provider"]=(string)id;
+   parser["comment"]=comment;
+
+   return(parser);
   }
 //+------------------------------------------------------------------+
 //| Create Withdrawing and Depositing JSON Data Object               |
 //+------------------------------------------------------------------+
-string CreateAccountTransactionJson(const string method,const double amount,const datetime time,const int id,const string comment)
-  {
-   string main="{"
-               +GetLine("type",method)
-               +GetLine("amount",amount)
-               +GetLine("time",TimeToString(time,TIME_SECONDS|TIME_DATE))
-               +GetLine("transaction_id_from_provider",(string)id)
-               +GetLine("comment",comment,true)
-               +"}";
-   return(main);
-  }
-//+------------------------------------------------------------------+
-//| Create Withdrawing and Depositing JSON Data Object               |
-//+------------------------------------------------------------------+
-string CreateOrderObjectJson(const string order_id,const string symbol,const double lotsize,
+CJAVal CreateOrderObjectJson(const string order_id,const string symbol,const double lotsize,
                              const double open_price,const ENUM_ORDER_TYPE order_type,const double sl_level,
                              const double tp_level,const datetime expiry,const datetime open_time,const datetime closed_time)
   {
-   string dir="SELL",type="LIMIT";
-   if(order_type==OP_BUY|| order_type==OP_BUYSTOP|| order_type==OP_BUYLIMIT) dir="BUY";
-   if(order_type== OP_BUYLIMIT|| order_type == OP_SELLLIMIT) type="LIMIT";
-   else if(order_type==OP_BUYSTOP || order_type==OP_SELLSTOP) type="STOP";
+   CJAVal parser(NULL,jtUNDEF);
 
-   string main="{"
-               +GetLine("order_id_from_provider",order_id)
-               +GetLine("account_id",AccountID)
-               +"\"trade_id\":null,"
-               +GetLine("trade_id_from_provider",order_id)
-               +GetLine("instrument_id_from_provider",symbol)
-               +GetLine("units",lotsize)
-               +GetLine("currency",symbol)
-               +GetLine("price",open_price)
-               +GetLine("execution_price",open_price)
-               +GetLine("direction",dir)//
-               +GetLine("stop_loss",sl_level)
-               +GetLine("take_profit",tp_level)
-               +GetLine("trailing_stop",0)
-               +GetLine("stop_loss_distance",0)
-               +GetLine("take_profit_distance",0)
-               +GetLine("trailing_stop_distance",0)
-               +GetLine("order_type",type)
-               +GetLine("status",order_type>OP_SELL?"PENDING":"FILLED")
-               +GetLine("expire_at",expiry>0?TimeToString(expiry,TIME_SECONDS|TIME_DATE):(string)0)
-               +GetLine("created_at_from_provider",open_time>0?TimeToString(open_time,TIME_SECONDS|TIME_DATE):(string)0)
-               +GetLine("closed_at_from_provider",closed_time>0?TimeToString(closed_time,TIME_SECONDS|TIME_DATE):(string)0,true)
-               +"}";
-   return(main);
+   string dir="SELL",type="LIMIT";
+   if(order_type==OP_BUY|| order_type==OP_BUYSTOP|| order_type==OP_BUYLIMIT)
+      dir="BUY";
+   if(order_type== OP_BUYLIMIT|| order_type == OP_SELLLIMIT)
+      type="LIMIT";
+   else
+      if(order_type==OP_BUYSTOP || order_type==OP_SELLSTOP)
+         type="STOP";
+
+   parser["order_id_from_provider"]=order_id;
+   parser["account_id"]=AccountID;
+   parser["trade_id"]="";
+   parser["trade_id_from_provider"]=order_id;
+   parser["instrument_id_from_provider"]=symbol;
+   parser["units"]=lotsize;
+   parser["currency"]=symbol;
+   parser["price"]=open_price;
+   parser["execution_price"]=open_price;
+   parser["direction"]=dir;
+   parser["stop_loss"]=sl_level;
+   parser["take_profit"]=tp_level;
+   parser["trailing_stop"]=0;
+   parser["stop_loss_distance"]=0;
+   parser["take_profit_distance"]=0;
+   parser["trailing_stop_distance"]=0;
+   parser["order_type"]=type;
+   parser["status"]=order_type>OP_SELL?"PENDING":"FILLED";
+   parser["expire_at"]=expiry>0?TimeToString(expiry,TIME_SECONDS|TIME_DATE):(string)0;
+   parser["created_at_from_provider"]=open_time>0?TimeToString(open_time,TIME_SECONDS|TIME_DATE):(string)0;
+   parser["closed_at_from_provider"]=closed_time>0?TimeToString(closed_time,TIME_SECONDS|TIME_DATE):(string)0;
+
+   return(parser);
   }
 //+------------------------------------------------------------------+
 //| Create a trade object in JSON                                    |
 //+------------------------------------------------------------------+
-string CreateTradeObjectJson(const string order_id,const string symbol,const double lotsize,
+CJAVal CreateTradeObjectJson(const string order_id,const string symbol,const double lotsize,
                              const double open_price,const double closed_price,const double PnL,const ENUM_ORDER_TYPE order_type,const double sl_level,
                              const double tp_level,const datetime open_time,const datetime closed_time,const double commission,const double rollover,const double other_fees
-                             )
+                            )
   {
-   double spread_cost=SymbolInfoInteger(symbol,SYMBOL_SPREAD)*Point*SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_VALUE)*lotsize;
-   string dir="SELL";
-   if(order_type==OP_BUY || order_type==OP_BUYSTOP || order_type==OP_BUYLIMIT) dir="BUY";
+   CJAVal parser(NULL,jtUNDEF);
+   double spread_cost = SymbolInfoInteger(symbol,SYMBOL_SPREAD)*Point*SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_VALUE)*lotsize;
 
-   string type="";
-   if(order_type==OP_BUYLIMIT || order_type==OP_SELLLIMIT) type="LIMIT";
-   else if(order_type==OP_BUYSTOP || order_type==OP_SELLSTOP) type="STOP";
+   string dir = "SELL";
+   if(order_type == OP_BUY || order_type == OP_BUYSTOP || order_type == OP_BUYLIMIT)
+      dir = "BUY";
 
-   string main="{"
-               +GetLine("trade_id_from_provider",order_id)
-               +GetLine("account_id",AccountID)
-               //+"\"trade_id\":null,"
-               +GetLine("instrument_id_from_provider",symbol)
-               +GetLine("direction",dir)
-               +GetLine("type",order_type<=OP_SELL?"MARKET":type)
-               +GetLine("units",lotsize)
-               +GetLine("currency",StringSubstr(symbol,3,3))
-               +GetLine("open_price",open_price)
-               +GetLine("closed_price",closed_time>0?closed_price:0)
-               +GetLine("profit_loss",closed_time>0?PnL:0.0)
-               +GetLine("open_profit_loss",closed_time>0?0:PnL)
-               +GetLine("rollover",rollover)
-               +GetLine("commission",commission)
-               +GetLine("other_fees",other_fees)
-               +GetLine("spread_cost",spread_cost)
-               +GetLine("status",closed_time>0?(order_type>OP_SELL?"CANCELLED":"CLOSED"):"OPEN")
-               +GetLine("balance_at_opening",AccountBalance()-PnL)
-               +GetLine("stop_loss",sl_level)
-               +GetLine("take_profit",tp_level)
-               +GetLine("trailing_stop",0)
-               +GetLine("stop_loss_distance",0)
-               +GetLine("take_profit_distance",0)
-               +GetLine("trailing_stop_distance",0)
-               +GetLine("created_at_from_provider",open_time>0?TimeToString(open_time,TIME_SECONDS|TIME_DATE):(string)0)
-               +GetLine("closed_at_from_provider",closed_time>0?TimeToString(closed_time,TIME_SECONDS|TIME_DATE):(string)0,true)
-               +"}";
+   string type = "";
+   if(order_type==OP_BUYLIMIT || order_type==OP_SELLLIMIT)
+      type = "LIMIT";
+   else
+      if(order_type==OP_BUYSTOP || order_type==OP_SELLSTOP)
+         type = "STOP";
 
-   return(main);
+   parser["trade_id_from_provider"]       = order_id;
+   parser["account_id"]                   = AccountID;
+   parser["instrument_id_from_provider"]  = symbol;
+   parser["direction"]                    = dir;
+   parser["type"]                         = order_type<=OP_SELL?"MARKET":type;
+   parser["units"]                        = lotsize;
+   parser["currency"]                     = StringSubstr(symbol,3,3);
+   parser["open_price"]                   = open_price;
+   parser["closed_price"]                 = closed_time>0?closed_price:0;
+   parser["profit_loss"]                  = closed_time>0?PnL:0.0;
+   parser["open_profit_loss"]             = closed_time>0?0:PnL;
+   parser["rollover"]                     = rollover;
+   parser["commission"]                   = commission;
+   parser["other_fees"]                   = other_fees;
+   parser["spread_cost"]                  = spread_cost;
+   parser["status"]                       = closed_time>0?(order_type>OP_SELL?"CANCELLED":"CLOSED"):"OPEN";
+   parser["balance_at_opening"]           = AccountBalance()-PnL;
+   parser["stop_loss"]                    = sl_level;
+   parser["take_profit"]                  = tp_level;
+   parser["trailing_stop"]                = 0;
+   parser["stop_loss_distance"]           = 0;
+   parser["take_profit_distance"]         = 0;
+   parser["trailing_stop_distance"]       = 0;
+   parser["created_at_from_provider"]     = open_time>0?TimeToString(open_time,TIME_SECONDS|TIME_DATE):(string)0;
+   parser["closed_at_from_provider"]      = closed_time>0?TimeToString(closed_time,TIME_SECONDS|TIME_DATE):(string)0;
+
+   return(parser);
   }
 //+------------------------------------------------------------------+
 //| Create currently opened order list                               |
 //+------------------------------------------------------------------+
-string CreateOpenedOrderListJson()
+CJAVal CreateOpenedOrderListJson()
   {
    double units;
-   string json="{"
-               +GetLine("version",1)
-               +GetLine("delete_data_not_in_list",true)
-               +"\"data\":[";
-   int x=0;
-   for(int i=OrdersTotal()-1;i>=0;i--)
-     {
-      if(!OrderSelect(i,SELECT_BY_POS)) continue;
-      if(OrderType()<=OP_SELL) continue;
+   CJAVal parser(NULL,jtUNDEF);
+   int j=0;
 
-      if(x>0)json+=",";
+   parser["version"]                 = api_version;
+   parser["delete_data_not_in_list"] = true;
+
+   for(int i=OrdersTotal()-1; i>=0; i--)
+     {
+      if(!OrderSelect(i,SELECT_BY_POS))
+         continue;
+      if(OrderType()<=OP_SELL)
+         continue;
+
       units=OrderLots()*MarketInfo(OrderSymbol(), MODE_LOTSIZE);
-      json+=CreateOrderObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),OrderExpiration(),OrderOpenTime(),OrderCloseTime());
-      x++;
+
+      parser["data"][j++]=CreateOrderObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),OrderExpiration(),OrderOpenTime(),OrderCloseTime());
      }
 
-   json+="] }";
+   if (j==0) parser["data"] = "";
 
-//if(x==0) return("");
-
-   return(json);
+   return(parser);
   }
 //+------------------------------------------------------------------+
 //| Create currently opened and closed trade list                    |
 //+------------------------------------------------------------------+
-string CreateTradesListJson(const bool firstRun)
+CJAVal CreateTradesListJson(const bool firstRun)
   {
    double units;
-   string json="{"
-               +GetLine("version",1)
-               +GetLine("delete_data_not_in_list",firstRun)
-               +"\"data\":[";
+   CJAVal parser(NULL,jtUNDEF);
 
-   datetime today=StringToTime(TimeToString(TimeCurrent(),TIME_DATE|TIME_DATE));
-   int x=0;
-   for(int i=OrdersTotal()-1;i>=0;i--)
+   parser["version"]                 = api_version;
+   parser["delete_data_not_in_list"] = firstRun;
+
+   datetime today = StringToTime(TimeToString(TimeCurrent(),TIME_DATE|TIME_DATE));
+   int j = 0;
+
+   for(int i=OrdersTotal()-1; i>=0; i--)
      {
-      if(!OrderSelect(i,SELECT_BY_POS)) continue;
-      if(OrderType()>OP_SELL) continue;
+      if(!OrderSelect(i,SELECT_BY_POS))
+         continue;
+      if(OrderType()>OP_SELL)
+         continue;
 
-      if(x++>0)json+=",";
-      units=OrderLots()*MarketInfo(OrderSymbol(), MODE_LOTSIZE);
-      json+=CreateTradeObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),OrderClosePrice(),OrderProfit(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),
-                                  OrderOpenTime(),OrderCloseTime(),OrderCommission(),OrderSwap(),0);
+      units               = OrderLots()*MarketInfo(OrderSymbol(), MODE_LOTSIZE);
+      parser["data"][j++] = CreateTradeObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),OrderClosePrice(),OrderProfit(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),
+                            OrderOpenTime(),OrderCloseTime(),OrderCommission(),OrderSwap(),0);
      }
 
-   for(int i=OrdersHistoryTotal()-1;i>=0;i--)
+   for(int i=OrdersHistoryTotal()-1; i>=0; i--)
      {
-      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY)) continue;
-      if(OrderSymbol()=="" || OrderSymbol()==NULL) continue;
-      if(!firstRun){if(OrderCloseTime()<today) continue;}
-      //if(OrderType()>OP_SELL) continue;
+      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
+         continue;
+      if(OrderSymbol()=="" || OrderSymbol()==NULL || (!firstRun && OrderCloseTime()<today))
+         continue;
 
-      if(x++>0)json+=",";
-      units=OrderLots()*MarketInfo(OrderSymbol(), MODE_LOTSIZE);
-      json+=CreateTradeObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),OrderClosePrice(),OrderProfit(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),
-                                  OrderOpenTime(),OrderCloseTime(),OrderCommission(),OrderSwap(),0);
+      units               = OrderLots()*MarketInfo(OrderSymbol(), MODE_LOTSIZE);
+      parser["data"][j++] = CreateTradeObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),OrderClosePrice(),OrderProfit(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),
+                            OrderOpenTime(),OrderCloseTime(),OrderCommission(),OrderSwap(),0);
      }
+     string str;
 
-   json+="] }";
+   if (j==0) parser["data"] = "";
 
-   if(x==0) return("");
-
-   return(json);
+   return(parser);
   }
 //+------------------------------------------------------------------+
