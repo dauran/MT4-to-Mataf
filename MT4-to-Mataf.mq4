@@ -354,9 +354,6 @@ bool UpdateOrderList()
    parser = CreateOpenedOrderListJson();
    parser.Serialize(str);
 
-   /*if(parser["data"]=="" || parser["data"]==NULL)
-      return(true);*/
-
    ArrayResize(data,StringToCharArray(str,data,0,-1,CP_UTF8)-1);
    int result=WebRequest("POST",fullUrl,headers,api_call_timeout,data,data,headers);
 
@@ -392,10 +389,11 @@ bool UpdateTradesList(const bool firstRun=false)
    string str;
 
    parser = CreateTradesListJson(firstRun);
-   parser.Serialize(str);
 
-   if(!firstRun && (parser["data"]=="" || parser["data"]==NULL))
+   if(!firstRun && parser["data"].Size()==0)
       return(true);
+     
+   parser.Serialize(str);
 
    ArrayResize(data,StringToCharArray(str,data,0,-1,CP_UTF8)-1);
    int result=WebRequest("POST",fullUrl,headers,api_call_timeout,data,data,headers);
@@ -559,7 +557,8 @@ CJAVal CreateOpenedOrderListJson()
       parser["data"][j++]=CreateOrderObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),OrderExpiration(),OrderOpenTime(),OrderCloseTime());
      }
 
-   if (j==0) parser["data"] = "";
+   if(j==0)
+      parser["data"] = "";
 
    return(parser);
   }
@@ -600,9 +599,9 @@ CJAVal CreateTradesListJson(const bool firstRun)
       parser["data"][j++] = CreateTradeObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),OrderClosePrice(),OrderProfit(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),
                             OrderOpenTime(),OrderCloseTime(),OrderCommission(),OrderSwap(),0);
      }
-     string str;
 
-   if (j==0) parser["data"] = "";
+  if(j==0)
+      parser["data"] = "";
 
    return(parser);
   }
