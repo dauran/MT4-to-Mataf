@@ -15,7 +15,7 @@
 //+-----------------------------------------------------------------------+
 #property copyright "Mataf.net"
 #property link      "https://www.mataf.net"
-#property version   "1.01"
+#property version   "1.02"
 #property strict
 #include "JAson.mqh"
 #include <WinUser32.mqh>
@@ -27,21 +27,18 @@ int SendMessageA(int hWnd,int Msg,int wParam,int lParam);
 #import
 
 //--- input parameters
-input int         updateFrequency = 5;                        // Update Interval(in seconds)
-input string      url="https://www.mataf.io";                 // URL
-input string      email="";                                   // Email
-input string      password="";                                // Password
-input int         api_call_timeout=60000;                     // Time out
-input string      token_file_name="MT4APISettings.txt";       // Settings File Name
-input string      AccountAlias="Test Account";
+input int         updateFrequency = 5;                         // Update Interval(in seconds)
+input string      email           = "";                        // Email
+input string      password        = "";                        // Password
+input string      AccountAlias    = "Test Account";
 
-string token="";
-int id_user;
-int api_version=1;
-int AccountID;
-string settings_file="";
-CJAVal settingsFileParser;
-bool previous_finished=true;
+string url              = "https://www.mataf.io";               // URL
+int    api_call_timeout = 60000;                                // Time out
+string token            = "";
+int    id_user;
+int    api_version      = 1;
+int    AccountID;
+bool   previous_finished=true;
 //+------------------------------------------------------------------+
 //| File Type                                                        |
 //+------------------------------------------------------------------+
@@ -96,31 +93,32 @@ void OnTimer()
 //+------------------------------------------------------------------+
 int ApiOnInit()
   {
-   Comment("Gettting the token...");
+   previous_finished=false;
+   Comment("connect to Mataf...");
    GetToken();
 
-   Sleep(300);
-   Comment("Creating an account...");
    if(!CreateAccount())
      {
       //---trying again with a fresh token
+      Comment("Connection to Mataf failed... Try again...");
       GetToken();
       if(!CreateAccount())
         {
-         Comment("Account Creation Failed!");
+         Comment("Connection to Mataf Failed!");
          return(INIT_FAILED);
         }
      }
-   else
-      Comment("Account created!...");
-   Sleep(500);
 
-//Alert("Connected!");
-   Comment("");
+   Comment("Connected to Mataf, Send trades data...");
    UpdateTradesList(true);
+   Comment("Connected to Mataf, Send orders data...");
    UpdateOrderList();
-//OnTickSimulated();
    connected=true;
+   previous_finished=true;
+
+   Comment("Data sent to Mataf...");
+   Sleep(500);
+   Comment("");
    return(INIT_SUCCEEDED);
   }
 //+------------------------------------------------------------------+
@@ -143,17 +141,6 @@ void OnTickSimulated()
    previous_finished=true;
   }
 //+------------------------------------------------------------------+
-//| Save token, id_user and AccountID onto the settings file         |
-//+------------------------------------------------------------------+
-void SaveSettings()
-  {
-   int handle=FileOpen(token_file_name,FILE_WRITE|FILE_TXT);
-   FileWriteString(handle,settings_file);
-   FileFlush(handle);
-   FileClose(handle);
-   Print("Token and id_user saved to file");
-  }
-//+------------------------------------------------------------------+
 //| Get new token                                                    |
 //+------------------------------------------------------------------+
 bool GetToken()
@@ -164,8 +151,8 @@ bool GetToken()
    string str;
    char data[];
 
-   parser["email"]=email;
-   parser["password"]=password;
+   parser["email"]    = email;
+   parser["password"] = password;
    parser.Serialize(str);
 
    ArrayResize(data,StringToCharArray(str,data,0,-1,CP_UTF8)-1);
@@ -173,23 +160,14 @@ bool GetToken()
 
    if(parser.Deserialize(data))
      {
-      token=parser["data"]["token"].ToStr();
+      token    = parser["data"]["token"].ToStr();
+      id_user  = (int)parser["data"]["id_user"].ToInt();
      }
    else
      {
       Print("Failed to get Token from API");
       return(false);
      }
-
-   id_user=(int)parser["data"]["id_user"].ToInt();
-
-//Print("New Token stored for id_user=",id_user);
-
-   settingsFileParser["token"]=token;
-   settingsFileParser["id_user"]=id_user;
-
-   settings_file=settingsFileParser.Serialize();
-   SaveSettings();
 
    return(true);
   }
@@ -199,40 +177,29 @@ bool GetToken()
 bool RefreshToken()
   {
    CJAVal parser(NULL,jtUNDEF);
-   string fullUrl=url+"/api/user/refreshToken";
-   string headers= StringFormat("Content-Type: application/json\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-Mataf-api-version: %d",token,id_user,api_version);
+   string fullUrl = url+"/api/user/refreshToken";
+   string headers = StringFormat("Content-Type: application/json\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-Mataf-api-version: %d",token,id_user,api_version);
 
    char data[];
    string str="";
 
-   parser["id_user"]=id_user;
-   parser["token"]=token;
+   parser["id_user"] = id_user;
+   parser["token"]   = token;
    parser.Serialize(str);
 
    ArrayResize(data,StringToCharArray(str,data,0,-1,CP_UTF8)-1);
    int result=WebRequest("POST",fullUrl,headers,api_call_timeout,data,data,headers);
-   Print("Result is "+(string)result+": "+(string)GetLastError());
 
    if(parser.Deserialize(data))
      {
       token=parser["data"]["token"].ToStr();
+      id_user=(int)parser["data"]["id_user"].ToInt();
      }
    else
      {
       Print("Failed to Deserialize");
       return(false);
      }
-
-   id_user=(int)parser["data"]["id_user"].ToInt();
-
-   Print("Token: "+token);
-   Print("id_user: ",id_user);
-
-   settingsFileParser["token"]=token;
-   settingsFileParser["id_user"]=id_user;
-
-   settings_file=settingsFileParser.Serialize();
-   SaveSettings();
 
    return(true);
   }
@@ -324,7 +291,7 @@ bool CreateAccount(const bool firstRun=true)
         {
          AccountID=(int)parser["data"]["id"].ToInt();
          if(firstRun)
-            PrintFormat("Account Created successfully, Account ID: %d",AccountID);
+            PrintFormat("Connected to Mataf, Account ID: %d",AccountID);
         }
      }
    else
@@ -332,11 +299,6 @@ bool CreateAccount(const bool firstRun=true)
       Print("Failed to Deserialize");
       return(false);
      }
-
-   settingsFileParser["AccountID"]=AccountID;
-   settings_file=settingsFileParser.Serialize();
-   if(firstRun)
-      SaveSettings();
 
    return(true);
   }
@@ -392,7 +354,7 @@ bool UpdateTradesList(const bool firstRun=false)
 
    if(!firstRun && parser["data"].Size()==0)
       return(true);
-     
+
    parser.Serialize(str);
 
    ArrayResize(data,StringToCharArray(str,data,0,-1,CP_UTF8)-1);
@@ -600,7 +562,7 @@ CJAVal CreateTradesListJson(const bool firstRun)
                             OrderOpenTime(),OrderCloseTime(),OrderCommission(),OrderSwap(),0);
      }
 
-  if(j==0)
+   if(j==0)
       parser["data"] = "";
 
    return(parser);
