@@ -421,27 +421,27 @@ CJAVal CreateOrderObjectJson(const string order_id,const string symbol,const dou
       if(order_type==OP_BUYSTOP || order_type==OP_SELLSTOP)
          type="STOP";
 
-   parser["order_id_from_provider"]=order_id;
-   parser["account_id"]=AccountID;
-   parser["trade_id"]="";
-   parser["trade_id_from_provider"]=order_id;
-   parser["instrument_id_from_provider"]=symbol;
-   parser["units"]=lotsize;
-   parser["currency"]=symbol;
-   parser["price"]=open_price;
-   parser["execution_price"]=open_price;
-   parser["direction"]=dir;
-   parser["stop_loss"]=sl_level;
-   parser["take_profit"]=tp_level;
-   parser["trailing_stop"]=0;
-   parser["stop_loss_distance"]=0;
-   parser["take_profit_distance"]=0;
-   parser["trailing_stop_distance"]=0;
-   parser["order_type"]=type;
-   parser["status"]=order_type>OP_SELL?"PENDING":"FILLED";
-   parser["expire_at"]=expiry>0?TimeToString(expiry,TIME_SECONDS|TIME_DATE):(string)0;
-   parser["created_at_from_provider"]=open_time>0?TimeToString(open_time,TIME_SECONDS|TIME_DATE):(string)0;
-   parser["closed_at_from_provider"]=closed_time>0?TimeToString(closed_time,TIME_SECONDS|TIME_DATE):(string)0;
+   parser["order_id_from_provider"]       = order_id;
+   parser["account_id"]                   = AccountID;
+   parser["trade_id"]                     = "";
+   parser["trade_id_from_provider"]       = order_id;
+   parser["instrument_id_from_provider"]  = symbol;
+   parser["units"]                        = lotsize;
+   parser["currency"]                     = SymbolInfoString(symbol,SYMBOL_CURRENCY_BASE);
+   parser["price"]                        = open_price;
+   parser["execution_price"]              = open_price;
+   parser["direction"]                    = dir;
+   parser["stop_loss"]                    = sl_level;
+   parser["take_profit"]                  = tp_level;
+   parser["trailing_stop"]                = 0;
+   parser["stop_loss_distance"]           = 0;
+   parser["take_profit_distance"]         = 0;
+   parser["trailing_stop_distance"]       = 0;
+   parser["order_type"]                   = type;
+   parser["status"]                       = order_type>OP_SELL?"PENDING":"FILLED";
+   parser["expire_at"]                    = expiry>0?TimeToString(expiry,TIME_SECONDS|TIME_DATE):(string)0;
+   parser["created_at_from_provider"]     = open_time>0?TimeToString(open_time,TIME_SECONDS|TIME_DATE):(string)0;
+   parser["closed_at_from_provider"]      = closed_time>0?TimeToString(closed_time,TIME_SECONDS|TIME_DATE):(string)0;
 
    return(parser);
   }
@@ -473,7 +473,7 @@ CJAVal CreateTradeObjectJson(const string order_id,const string symbol,const dou
    parser["direction"]                    = dir;
    parser["type"]                         = order_type<=OP_SELL?"MARKET":type;
    parser["units"]                        = lotsize;
-   parser["currency"]                     = StringSubstr(symbol,3,3);
+   parser["currency"]                     = SymbolInfoString(symbol,SYMBOL_CURRENCY_BASE);
    parser["open_price"]                   = open_price;
    parser["closed_price"]                 = closed_time>0?closed_price:0;
    parser["profit_loss"]                  = closed_time>0?PnL:0.0;
