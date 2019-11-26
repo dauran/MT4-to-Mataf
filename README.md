@@ -7,5 +7,7 @@ Create an account on https://www.mataf.net use your credentials (email+password)
 
 Developed by Lakshan Perera: https://www.upwork.com/o/profiles/users/_~0117e7a3d2ba0ba25e/ 
 
+Source code of the MQL code for JSON Serialization and Deserialization can be found here: https://www.mql5.com/en/code/13663 
+
 This software is licensed under the Apache License, Version 2.0
 which can be obtained at http://www.apache.org/licenses/LICENSE-2.0

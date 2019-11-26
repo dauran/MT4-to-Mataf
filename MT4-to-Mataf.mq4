@@ -13,9 +13,12 @@
 //|                  use your credentials (email+password) to use this EA |
 //|                                                                       |
 //+-----------------------------------------------------------------------+
+#define   VERSION   "1.03"
+#define   SOURCE    "MT4"
+
 #property copyright "Mataf.net"
 #property link      "https://www.mataf.net"
-#property version   "1.02"
+#property version   VERSION
 #property strict
 #include "JAson.mqh"
 #include <WinUser32.mqh>
@@ -27,16 +30,16 @@ int SendMessageA(int hWnd,int Msg,int wParam,int lParam);
 #import
 
 //--- input parameters
-input int         updateFrequency = 5;                         // Update Interval(in seconds)
-input string      email           = "";                        // Email
-input string      password        = "";                        // Password
-input string      AccountAlias    = "Test Account";
+input string      email           = "";                 // Email
+input string      password        = "";                 // Password
+input string      AccountAlias    = "Account MT4";      // Alias
 
-string url              = "https://www.mataf.io";               // URL
-int    api_call_timeout = 60000;                                // Time out
+string url              = "https://www.mataf.io";       // URL
+int    updateFrequency  = 5;                            // Update Interval(in seconds)
+int    api_call_timeout = 60000;                        // Time out
 string token            = "";
 int    id_user;
-int    api_version      = 1;
+double api_version      = (double)VERSION;
 int    AccountID;
 bool   previous_finished=true;
 //+------------------------------------------------------------------+
@@ -230,7 +233,7 @@ bool CreateAccount(const bool firstRun=true)
          continue;
       if(OrderType()!=6)
          continue;
-      created_time=TimeToString(OrderCloseTime(),TIME_SECONDS|TIME_DATE);
+      created_time=dateToGMT(OrderCloseTime());
 
       break;
      }
@@ -258,9 +261,11 @@ bool CreateAccount(const bool firstRun=true)
      }
 
    parser["version"]                          = api_version;
+   parser["date"]                             = dateToGMT(TimeCurrent());
+
    parser["data"]["account_id_from_provider"] = (string)AccountNumber();
    parser["data"]["provider_name"]            = AccountCompany();
-   parser["data"]["source_name"]              = "MT4";
+   parser["data"]["source_name"]              = SOURCE;
    parser["data"]["user_id_from_provider"]    = (string)AccountNumber();
    parser["data"]["account_alias"]            = AccountAlias;
    parser["data"]["account_name"]             = AccountName();
@@ -397,7 +402,7 @@ CJAVal CreateAccountTransactionJson(const string method,const double amount,cons
    CJAVal parser(NULL,jtUNDEF);
    parser["type"]=method;
    parser["amount"]=amount;
-   parser["time"]=TimeToString(time,TIME_SECONDS|TIME_DATE);
+   parser["time"]=dateToGMT(time);
    parser["transaction_id_from_provider"]=(string)id;
    parser["comment"]=comment;
 
@@ -439,9 +444,9 @@ CJAVal CreateOrderObjectJson(const string order_id,const string symbol,const dou
    parser["trailing_stop_distance"]       = 0;
    parser["order_type"]                   = type;
    parser["status"]                       = order_type>OP_SELL?"PENDING":"FILLED";
-   parser["expire_at"]                    = expiry>0?TimeToString(expiry,TIME_SECONDS|TIME_DATE):(string)0;
-   parser["created_at_from_provider"]     = open_time>0?TimeToString(open_time,TIME_SECONDS|TIME_DATE):(string)0;
-   parser["closed_at_from_provider"]      = closed_time>0?TimeToString(closed_time,TIME_SECONDS|TIME_DATE):(string)0;
+   parser["expire_at"]                    = dateToGMT(expiry);
+   parser["created_at_from_provider"]     = dateToGMT(open_time);
+   parser["closed_at_from_provider"]      = dateToGMT(closed_time);
 
    return(parser);
   }
@@ -490,8 +495,9 @@ CJAVal CreateTradeObjectJson(const string order_id,const string symbol,const dou
    parser["stop_loss_distance"]           = 0;
    parser["take_profit_distance"]         = 0;
    parser["trailing_stop_distance"]       = 0;
-   parser["created_at_from_provider"]     = open_time>0?TimeToString(open_time,TIME_SECONDS|TIME_DATE):(string)0;
-   parser["closed_at_from_provider"]      = closed_time>0?TimeToString(closed_time,TIME_SECONDS|TIME_DATE):(string)0;
+   parser["created_at_from_provider"]     = dateToGMT(open_time);
+   parser["closed_at_from_provider"]      = dateToGMT(closed_time);
+   parser["current_time"]                 = dateToGMT(TimeCurrent());
 
    return(parser);
   }
@@ -506,6 +512,7 @@ CJAVal CreateOpenedOrderListJson()
 
    parser["version"]                 = api_version;
    parser["delete_data_not_in_list"] = true;
+   parser["date"]                    = dateToGMT(TimeCurrent());
 
    for(int i=OrdersTotal()-1; i>=0; i--)
      {
@@ -534,10 +541,12 @@ CJAVal CreateTradesListJson(const bool firstRun)
 
    parser["version"]                 = api_version;
    parser["delete_data_not_in_list"] = firstRun;
+   parser["date"]                    = dateToGMT(TimeCurrent());
 
-   datetime today = StringToTime(TimeToString(TimeCurrent(),TIME_DATE|TIME_DATE));
+   datetime yesterday = TimeCurrent() - (24*60*60);
    int j = 0;
 
+//Open Positions
    for(int i=OrdersTotal()-1; i>=0; i--)
      {
       if(!OrderSelect(i,SELECT_BY_POS))
@@ -550,11 +559,12 @@ CJAVal CreateTradesListJson(const bool firstRun)
                             OrderOpenTime(),OrderCloseTime(),OrderCommission(),OrderSwap(),0);
      }
 
+//Closed Positions
    for(int i=OrdersHistoryTotal()-1; i>=0; i--)
      {
       if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
          continue;
-      if(OrderSymbol()=="" || OrderSymbol()==NULL || (!firstRun && OrderCloseTime()<today))
+      if(OrderSymbol()=="" || OrderSymbol()==NULL || (!firstRun && OrderCloseTime()<yesterday))
          continue;
 
       units               = OrderLots()*MarketInfo(OrderSymbol(), MODE_LOTSIZE);
@@ -567,4 +577,21 @@ CJAVal CreateTradesListJson(const bool firstRun)
 
    return(parser);
   }
+//+------------------------------------------------------------------+
+//| Convert the date to GMT                                          |
+//+------------------------------------------------------------------+
+string dateToGMT(datetime dateToConvert)
+  {
+   float GMTOffset = (float)(TimeGMT() - TimeCurrent());
+   return dateToConvert>0? displayDate((datetime)(dateToConvert + GMTOffset)):(string)0;
+  }
+
+//+------------------------------------------------------------------+
+//| Display a date with the correct format                           |
+//+------------------------------------------------------------------+
+string displayDate(datetime dateToDisplay)
+  {
+   return dateToDisplay>0? TimeToString(dateToDisplay,TIME_SECONDS|TIME_DATE):(string)0;
+  }
+//+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
