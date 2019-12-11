@@ -30,13 +30,13 @@ int SendMessageA(int hWnd,int Msg,int wParam,int lParam);
 #import
 
 //--- input parameters
-input string      email           = "";                 // Email
-input string      password        = "";                 // Password
-input string      AccountAlias    = "Account MT4";      // Alias
+input string      email            = "";                      // Email
+input string      password         = "";                      // Password
+input string      AccountAlias     = "Account MT4";           // Alias
+input string      url              = "https://www.mataf.io";  // URL
+input int         updateFrequency  = 5;                       // Update Interval(in seconds)
+input int         api_call_timeout = 60000;                   // Time out
 
-string url              = "https://www.mataf.io";       // URL
-int    updateFrequency  = 5;                            // Update Interval(in seconds)
-int    api_call_timeout = 60000;                        // Time out
 string token            = "";
 int    id_user;
 double api_version      = (double)VERSION;
