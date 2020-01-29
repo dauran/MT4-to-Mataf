@@ -13,7 +13,7 @@
 //|                  use your credentials (email+password) to use this EA |
 //|                                                                       |
 //+-----------------------------------------------------------------------+
-#define   VERSION   "1.03"
+#define   VERSION   "1.04"
 #define   SOURCE    "MT4"
 
 #property copyright "Mataf.net"
@@ -29,12 +29,20 @@ int SetForegroundWindow(int hWnd);
 int SendMessageA(int hWnd,int Msg,int wParam,int lParam);
 #import
 
+enum ENUM_HEADER_TYPE
+  {
+   H_CONNECT         = 0,
+   H_GET             = 1,
+   H_POST            = 2,
+   H_PUT             = 3
+  };
+
 //--- input parameters
 input string      email            = "";                      // Email
 input string      password         = "";                      // Password
 input string      AccountAlias     = "Account MT4";           // Alias
 input string      url              = "https://www.mataf.io";  // URL
-input int         updateFrequency  = 5;                       // Update Interval(in seconds)
+input int         updateFrequency  = 60;                      // Update Interval(in seconds)
 input int         api_call_timeout = 60000;                   // Time out
 
 string token            = "";
@@ -144,13 +152,38 @@ void OnTickSimulated()
    previous_finished=true;
   }
 //+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+string getHeaders(ENUM_HEADER_TYPE type)
+  {
+   string headers;
+
+   switch(type)
+     {
+      case H_CONNECT:
+         headers = StringFormat("Content-Type: application/json\r\n X-Mataf-api-version: %2.f\r\n X-Mataf-source: %s",api_version,SOURCE);
+         break;
+      case H_PUT:
+         headers = StringFormat("Content-Type: application/json\r\n X-Mataf-api-version: %2.f\r\n X-Mataf-source: %s\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-HTTP-Method-Override: PUT",api_version,SOURCE,token,id_user);
+         break;
+      case H_POST:
+      case H_GET:
+      default:
+         headers = StringFormat("Content-Type: application/json\r\n X-Mataf-api-version: %2.f\r\n X-Mataf-source: %s\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d",api_version,SOURCE,token,id_user);
+         break;
+     }
+   return (headers);
+
+  }
+
+//+------------------------------------------------------------------+
 //| Get new token                                                    |
 //+------------------------------------------------------------------+
 bool GetToken()
   {
    CJAVal parser(NULL,jtUNDEF);
    string fullUrl = url+"/api/user/login";
-   string headers = StringFormat("Content-Type: application/json\r\n X-Mataf-api-version: %d\r\n",api_version);
+   string headers = getHeaders(H_CONNECT);
    string str;
    char data[];
 
@@ -163,8 +196,13 @@ bool GetToken()
 
    if(parser.Deserialize(data))
      {
-      token    = parser["data"]["token"].ToStr();
-      id_user  = (int)parser["data"]["id_user"].ToInt();
+      token   = parser["data"]["token"].ToStr();
+      id_user = (int)parser["data"]["id_user"].ToInt();
+      if(parser["api_version"].ToDbl()>api_version)
+         MessageBox("Please update your EA. Your version: "+(string)api_version+", current version: "+parser["api_version"].ToStr());
+      else
+         Print("Your EA is up to date");
+
      }
    else
      {
@@ -181,7 +219,7 @@ bool RefreshToken()
   {
    CJAVal parser(NULL,jtUNDEF);
    string fullUrl = url+"/api/user/refreshToken";
-   string headers = StringFormat("Content-Type: application/json\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-Mataf-api-version: %d",token,id_user,api_version);
+   string headers = getHeaders(H_POST);
 
    char data[];
    string str="";
@@ -206,6 +244,62 @@ bool RefreshToken()
 
    return(true);
   }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void updateBalanceHistory(CJAVal &account)
+  {
+   CJAVal balanceHistory(NULL,jtUNDEF);
+   CJAVal balanceDetail(NULL,jtUNDEF);
+
+   int    j=0,k=0;
+   double balance=0,variation;
+   double total_deposits = 0,total_withdraw=0;
+   string created_time = "";
+
+   for(int i=0; i<OrdersHistoryTotal(); i++)
+     {
+      if(OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
+        {
+         variation = OrderProfit()+OrderCommission()+OrderSwap();
+         if(variation!=0)
+           {
+            balance += variation;
+
+            //--- Get all the deal properties
+            balanceDetail["time"]                         = dateToGMT((datetime)OrderCloseTime());
+            balanceDetail["balance"]                      = balance;
+            balanceDetail["variation"]                    = variation;
+            balanceDetail["transaction_id_from_provider"] = OrderTicket();
+            balanceDetail["comment"]                      = OrderSymbol() + OrderComment();
+
+            account["data"]["balance_history"][j++]=balanceDetail;
+            if(OrderType()==6) //might be "Deposit" or "Withdraw" but also "Interest rates" and probably other operation types. Unfortunately I didn't find a way to filter those orders :(
+              {
+               if(created_time=="")
+                  created_time=dateToGMT(OrderCloseTime());
+               if(OrderProfit()>0)
+                 {
+                  total_deposits                          += OrderProfit();
+                  account["data"]["funds"]["history"][k++] = CreateAccountTransactionJson("FUNDING",OrderProfit(),OrderCloseTime(),OrderTicket(),OrderComment());
+                 }
+               else
+                 {
+                  total_withdraw                          += MathAbs(OrderProfit());
+                  account["data"]["funds"]["history"][k++] = CreateAccountTransactionJson("WITHDRAW",OrderProfit(),OrderCloseTime(),OrderTicket(),OrderComment());
+                 }
+              }
+           }
+        }
+     }
+
+   account["data"]["created_at_from_provider"] = created_time;
+   account["data"]["profit_loss"]              = AccountBalance()-(total_deposits-total_withdraw);
+   account["data"]["funds"]["deposit"]         = total_deposits;
+   account["data"]["funds"]["withdraw"]        = -1*total_withdraw;
+
+  }
 //+------------------------------------------------------------------+
 //| Create new account/update existing                               |
 //+------------------------------------------------------------------+
@@ -213,51 +307,17 @@ bool CreateAccount(const bool firstRun=true)
   {
    CJAVal parser(NULL,jtUNDEF);
    string fullUrl=url+"/api/trading/accounts";
-   string headers= StringFormat("Content-Type: application/json\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-Mataf-api-version: %d",token,id_user,api_version);
+   string headers= getHeaders(H_POST);
 
    char data[];
    string str="";
-   string created_time="";
    int hwindow=GetAncestor(WindowHandle(Symbol(),Period()),2);
    if(hwindow!=0)
      {
-      SetForegroundWindow(hwindow); //active the terminal (the terminal most be the active window)
+      SetForegroundWindow(hwindow); //active the terminal (the terminal must be the active window)
       Sleep(100);
       SendMessageA(hwindow,WM_COMMAND,33058,0);
-     }
-
-   for(int i=OrdersHistoryTotal()-1; i>=0; i--)
-     {
-      Sleep(500);
-      if(!OrderSelect(0,SELECT_BY_POS,MODE_HISTORY))
-         continue;
-      if(OrderType()!=6)
-         continue;
-      created_time=dateToGMT(OrderCloseTime());
-
-      break;
-     }
-
-   double total_deposits=0,total_withdraw=0;
-   CJAVal acountdepositsObject(NULL,jtUNDEF);
-
-   int j=0;
-   for(int i=OrdersHistoryTotal()-1; i>=0; i--)
-     {
-      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
-         continue;
-      if(OrderType()!=6)
-         continue;
-      if(OrderProfit()>0)
-        {
-         total_deposits           += OrderProfit();
-         acountdepositsObject[j++] = CreateAccountTransactionJson("FUNDING",OrderProfit(),OrderOpenTime(),OrderTicket(),OrderComment());
-        }
-      else
-        {
-         total_withdraw           += MathAbs(OrderProfit());
-         acountdepositsObject[j++] = CreateAccountTransactionJson("WITHDRAW",OrderProfit(),OrderOpenTime(),OrderTicket(),OrderComment());
-        }
+      Sleep(100);
      }
 
    parser["version"]                          = api_version;
@@ -273,12 +333,15 @@ bool CreateAccount(const bool firstRun=true)
    parser["data"]["is_live"]                  = !IsDemo();
    parser["data"]["is_active"]                = true;
    parser["data"]["balance"]                  = (float)AccountBalance();
-   parser["data"]["profit_loss"]              = AccountBalance()-(total_deposits-total_withdraw);
+   parser["data"]["balance_history"][0]       = 0; //calulated in updateBalanceHistory
+   parser["data"]["profit_loss"]              = 0; //calulated in updateBalanceHistory
    parser["data"]["open_profit_loss"]         = AccountProfit();
-   parser["data"]["funds"]["deposit"]         = total_deposits;
-   parser["data"]["funds"]["withdraw"]        = -1*total_withdraw;
-   parser["data"]["history"]                  = acountdepositsObject;
-   parser["data"]["created_at_from_provider"] = created_time;
+   parser["data"]["funds"]["deposit"]         = 0; //calulated in updateBalanceHistory
+   parser["data"]["funds"]["withdraw"]        = 0; //calulated in updateBalanceHistory
+   parser["data"]["funds"]["history"][0]      = 0; //calulated in updateBalanceHistory
+   parser["data"]["created_at_from_provider"] = 0; //calulated in updateBalanceHistory
+
+   updateBalanceHistory(parser);
 
    parser.Serialize(str);
 
@@ -314,7 +377,7 @@ bool UpdateOrderList()
   {
    CJAVal parser(NULL,jtUNDEF);
    string fullUrl=url+"/api/trading/accounts/"+(string)AccountID+"/orders";
-   string headers= StringFormat("Content-Type: application/json\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-Mataf-api-version: %d\r\n X-HTTP-Method-Override: PUT",token,id_user,api_version);
+   string headers= getHeaders(H_PUT);
    char data[];
    string str;
 
@@ -350,7 +413,7 @@ bool UpdateTradesList(const bool firstRun=false)
   {
    CJAVal parser(NULL,jtUNDEF);
    string fullUrl=url+"/api/trading/accounts/"+(string)AccountID+"/trades";
-   string headers= StringFormat("Content-Type: application/json\r\n X-Mataf-token: %s\r\n X-Mataf-id: %d\r\n X-Mataf-api-version: %d\r\n X-HTTP-Method-Override: PUT",token,id_user,api_version);
+   string headers= getHeaders(H_PUT);
 
    char data[];
    string str;
@@ -591,7 +654,9 @@ string dateToGMT(datetime dateToConvert)
 //+------------------------------------------------------------------+
 string displayDate(datetime dateToDisplay)
   {
-   return dateToDisplay>0? TimeToString(dateToDisplay,TIME_SECONDS|TIME_DATE):(string)0;
+   string date = dateToDisplay>0 ? TimeToString(dateToDisplay,TIME_SECONDS|TIME_DATE) : (string)0;
+   StringReplace(date,".","-");
+   return date;
   }
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
