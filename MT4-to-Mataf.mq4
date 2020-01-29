@@ -45,11 +45,13 @@ input string      url              = "https://www.mataf.io";  // URL
 input int         updateFrequency  = 60;                      // Update Interval(in seconds)
 input int         api_call_timeout = 60000;                   // Time out
 
-string token            = "";
+string token             = "";
 int    id_user;
-double api_version      = (double)VERSION;
+double api_version       = (double)VERSION;
 int    AccountID;
-bool   previous_finished=true;
+bool   previous_finished = true;
+bool   connected         = false;
+CJAVal balanceHistory(NULL,jtUNDEF);
 //+------------------------------------------------------------------+
 //| File Type                                                        |
 //+------------------------------------------------------------------+
@@ -59,7 +61,6 @@ enum ENUM_FILE_TYPE
    USER_ID,
    ACCOUNT_ID
   };
-bool connected=false;
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
@@ -250,10 +251,7 @@ bool RefreshToken()
 //+------------------------------------------------------------------+
 void updateBalanceHistory(CJAVal &account)
   {
-   CJAVal balanceHistory(NULL,jtUNDEF);
-   CJAVal balanceDetail(NULL,jtUNDEF);
-
-   int    j=0,k=0;
+   int    j=0,k=0,l=0;
    double balance=0,variation;
    double total_deposits = 0,total_withdraw=0;
    string created_time = "";
@@ -263,18 +261,19 @@ void updateBalanceHistory(CJAVal &account)
       if(OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
         {
          variation = OrderProfit()+OrderCommission()+OrderSwap();
-         if(variation!=0)
+         if(variation!=0 || 1==1)
            {
             balance += variation;
 
-            //--- Get all the deal properties
-            balanceDetail["time"]                         = dateToGMT((datetime)OrderCloseTime());
-            balanceDetail["balance"]                      = balance;
-            balanceDetail["variation"]                    = variation;
-            balanceDetail["transaction_id_from_provider"] = OrderTicket();
-            balanceDetail["comment"]                      = OrderSymbol() + OrderComment();
 
-            account["data"]["balance_history"][j++]=balanceDetail;
+            //--- Get all the deal properties
+            balanceHistory[l]["time"]                         = dateToGMT((datetime)OrderCloseTime());
+            balanceHistory[l]["balance"]                      = balance;
+            balanceHistory[l]["variation"]                    = variation;
+            balanceHistory[l]["transaction_id_from_provider"] = OrderTicket();
+            balanceHistory[l]["comment"]                      = OrderSymbol() + OrderComment();
+
+            account["data"]["balance_history"][j++]=balanceHistory[l++];
             if(OrderType()==6) //might be "Deposit" or "Withdraw" but also "Interest rates" and probably other operation types. Unfortunately I didn't find a way to filter those orders :(
               {
                if(created_time=="")
@@ -472,7 +471,7 @@ CJAVal CreateAccountTransactionJson(const string method,const double amount,cons
    return(parser);
   }
 //+------------------------------------------------------------------+
-//| Create Withdrawing and Depositing JSON Data Object               |
+//| Create Order JSON Data Object                                    |
 //+------------------------------------------------------------------+
 CJAVal CreateOrderObjectJson(const string order_id,const string symbol,const double lotsize,
                              const double open_price,const ENUM_ORDER_TYPE order_type,const double sl_level,
@@ -543,15 +542,15 @@ CJAVal CreateTradeObjectJson(const string order_id,const string symbol,const dou
    parser["units"]                        = lotsize;
    parser["currency"]                     = SymbolInfoString(symbol,SYMBOL_CURRENCY_BASE);
    parser["open_price"]                   = open_price;
-   parser["closed_price"]                 = closed_time>0?closed_price:0;
-   parser["profit_loss"]                  = closed_time>0?PnL:0.0;
-   parser["open_profit_loss"]             = closed_time>0?0:PnL;
+   parser["closed_price"]                 = closed_time>0 ? closed_price : 0;
+   parser["profit_loss"]                  = closed_time>0 ? PnL : 0.0;
+   parser["open_profit_loss"]             = closed_time>0 ? 0 : PnL;
    parser["rollover"]                     = rollover;
    parser["commission"]                   = commission;
    parser["other_fees"]                   = other_fees;
    parser["spread_cost"]                  = spread_cost;
    parser["status"]                       = closed_time>0?(order_type>OP_SELL?"CANCELLED":"CLOSED"):"OPEN";
-   parser["balance_at_opening"]           = AccountBalance()-PnL;
+   parser["balance_at_opening"]           = balanceSearch(dateToGMT(open_time)); //AccountBalance()-PnL;
    parser["stop_loss"]                    = sl_level;
    parser["take_profit"]                  = tp_level;
    parser["trailing_stop"]                = 0;
@@ -639,6 +638,20 @@ CJAVal CreateTradesListJson(const bool firstRun)
       parser["data"] = "";
 
    return(parser);
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+double balanceSearch(string date)
+  {
+   int i;
+   for(i=0; i<balanceHistory.Size(); i++)
+     {
+      if(balanceHistory[i]["time"].ToStr()>date)
+         break;
+     }
+   return balanceHistory[i-1]["balance"].ToDbl();
   }
 //+------------------------------------------------------------------+
 //| Convert the date to GMT                                          |
