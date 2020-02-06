@@ -13,7 +13,7 @@
 //|                  use your credentials (email+password) to use this EA |
 //|                                                                       |
 //+-----------------------------------------------------------------------+
-#define   VERSION   "1.04"
+#define   VERSION   "1.05"
 #define   SOURCE    "MT4"
 
 #property copyright "Mataf.net"
@@ -251,33 +251,39 @@ bool RefreshToken()
 //+------------------------------------------------------------------+
 void updateBalanceHistory(CJAVal &account)
   {
-   int    j=0,k=0,l=0;
-   double balance=0,variation;
-   double total_deposits = 0,total_withdraw=0;
-   string created_time = "";
+   int      j=0, k=0, l=0;
+   double   balance        = 0;
+   double   variation      = 0;
+   double   total_deposits = 0;
+   double   total_withdraw = 0;
+   string   created_time   = "";
+   datetime transactiontime;
 
    for(int i=0; i<OrdersHistoryTotal(); i++)
      {
       if(OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
         {
+         if(created_time=="")
+            created_time=dateToGMT(OrderOpenTime());
+
          variation = OrderProfit()+OrderCommission()+OrderSwap();
          if(variation!=0 || 1==1)
            {
             balance += variation;
 
+            //-- Transaction time is the close time for a trade and the open time for a deposit/withdraw
+            transactiontime = (OrderType()==6) ? OrderOpenTime() : OrderCloseTime();
 
             //--- Get all the deal properties
-            balanceHistory[l]["time"]                         = dateToGMT((datetime)OrderCloseTime());
+            balanceHistory[l]["time"]                         = dateToGMT((datetime)transactiontime);
             balanceHistory[l]["balance"]                      = balance;
             balanceHistory[l]["variation"]                    = variation;
             balanceHistory[l]["transaction_id_from_provider"] = OrderTicket();
-            balanceHistory[l]["comment"]                      = OrderSymbol() + OrderComment();
+            balanceHistory[l]["comment"]                      = OrderSymbol() +" "+ OrderComment() + ", open:"+dateToGMT((datetime)OrderOpenTime())+", close:"+dateToGMT((datetime)OrderCloseTime());
 
             account["data"]["balance_history"][j++]=balanceHistory[l++];
             if(OrderType()==6) //might be "Deposit" or "Withdraw" but also "Interest rates" and probably other operation types. Unfortunately I didn't find a way to filter those orders :(
               {
-               if(created_time=="")
-                  created_time=dateToGMT(OrderCloseTime());
                if(OrderProfit()>0)
                  {
                   total_deposits                          += OrderProfit();
