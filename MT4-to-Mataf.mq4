@@ -13,7 +13,7 @@
 //|                  use your credentials (email+password) to use this EA |
 //|                                                                       |
 //+-----------------------------------------------------------------------+
-#define   VERSION   "1.05"
+#define   VERSION   "1.06"
 #define   SOURCE    "MT4"
 
 #property copyright "Mataf.net"
@@ -42,7 +42,7 @@ input string      email            = "";                      // Email
 input string      password         = "";                      // Password
 input string      AccountAlias     = "Account MT4";           // Alias
 input string      url              = "https://www.mataf.io";  // URL
-input int         updateFrequency  = 60;                      // Update Interval(in seconds)
+input int         updateFrequency  = 900;                     // Update Interval(in seconds)
 input int         api_call_timeout = 60000;                   // Time out
 
 string token             = "";
@@ -106,7 +106,7 @@ void OnTimer()
 int ApiOnInit()
   {
    previous_finished=false;
-   Comment("connect to Mataf...");
+   Comment("Connect to Mataf...");
    GetToken();
 
    if(!CreateAccount())
@@ -123,7 +123,7 @@ int ApiOnInit()
 
    Comment("Connected to Mataf, Send trades data...");
    UpdateTradesList(true);
-   Comment("Connected to Mataf, Send orders data...");
+   Comment("Connected to Mataf, Send trades data, Send orders data...");
    UpdateOrderList();
    connected=true;
    previous_finished=true;
@@ -251,7 +251,7 @@ bool RefreshToken()
 //+------------------------------------------------------------------+
 void updateBalanceHistory(CJAVal &account)
   {
-   int      j=0, k=0, l=0;
+   int      iOrder=0, iAccountBalance=0, iFundHistory=0, iBalanceHistory=0, iBalance;
    double   balance        = 0;
    double   variation      = 0;
    double   total_deposits = 0;
@@ -259,15 +259,15 @@ void updateBalanceHistory(CJAVal &account)
    string   created_time   = "";
    datetime transactiontime;
 
-   for(int i=0; i<OrdersHistoryTotal(); i++)
+   for(iOrder=0; iOrder<OrdersHistoryTotal(); iOrder++)
      {
-      if(OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
+      if(OrderSelect(iOrder,SELECT_BY_POS,MODE_HISTORY))
         {
          if(created_time=="")
             created_time=dateToGMT(OrderOpenTime());
 
          variation = OrderProfit()+OrderCommission()+OrderSwap();
-         if(variation!=0 || 1==1)
+         if(variation!=0)
            {
             balance += variation;
 
@@ -275,34 +275,69 @@ void updateBalanceHistory(CJAVal &account)
             transactiontime = (OrderType()==6) ? OrderOpenTime() : OrderCloseTime();
 
             //--- Get all the deal properties
-            balanceHistory[l]["time"]                         = dateToGMT((datetime)transactiontime);
-            balanceHistory[l]["balance"]                      = balance;
-            balanceHistory[l]["variation"]                    = variation;
-            balanceHistory[l]["transaction_id_from_provider"] = OrderTicket();
-            balanceHistory[l]["comment"]                      = OrderSymbol() +" "+ OrderComment() + ", open:"+dateToGMT((datetime)OrderOpenTime())+", close:"+dateToGMT((datetime)OrderCloseTime());
-
-            account["data"]["balance_history"][j++]=balanceHistory[l++];
+            balanceHistory[iBalanceHistory]["time"]                         = dateToGMT((datetime)transactiontime);
+            balanceHistory[iBalanceHistory]["balance"]                      = balance;
+            balanceHistory[iBalanceHistory]["variation"]                    = variation;
+            balanceHistory[iBalanceHistory]["transaction_id_from_provider"] = OrderTicket();
+            balanceHistory[iBalanceHistory]["comment"]                      = OrderSymbol() +" "+ OrderComment() + ", open:"+dateToGMT((datetime)OrderOpenTime())+", close:"+dateToGMT((datetime)OrderCloseTime());
+            iBalanceHistory++;
+            //account["data"]["balance_history"][iAccountBalance++] = balanceHistory[iBalanceHistory++];
             if(OrderType()==6) //might be "Deposit" or "Withdraw" but also "Interest rates" and probably other operation types. Unfortunately I didn't find a way to filter those orders :(
               {
                if(OrderProfit()>0)
                  {
                   total_deposits                          += OrderProfit();
-                  account["data"]["funds"]["history"][k++] = CreateAccountTransactionJson("FUNDING",OrderProfit(),OrderCloseTime(),OrderTicket(),OrderComment());
+                  account["data"]["funds"]["history"][iFundHistory++] = CreateAccountTransactionJson("FUNDING",OrderProfit(),OrderCloseTime(),OrderTicket(),OrderComment());
                  }
                else
                  {
                   total_withdraw                          += MathAbs(OrderProfit());
-                  account["data"]["funds"]["history"][k++] = CreateAccountTransactionJson("WITHDRAW",OrderProfit(),OrderCloseTime(),OrderTicket(),OrderComment());
+                  account["data"]["funds"]["history"][iFundHistory++] = CreateAccountTransactionJson("WITHDRAW",OrderProfit(),OrderCloseTime(),OrderTicket(),OrderComment());
                  }
               }
            }
         }
      }
 
+   SortBalanceHistory(); //-- Because it may not be in the right order
+
+   for(iBalance=0; iBalance<balanceHistory.Size(); iBalance++)
+      account["data"]["balance_history"][iBalance] = balanceHistory[iBalance];
+
    account["data"]["created_at_from_provider"] = created_time;
    account["data"]["profit_loss"]              = AccountBalance()-(total_deposits-total_withdraw);
    account["data"]["funds"]["deposit"]         = total_deposits;
    account["data"]["funds"]["withdraw"]        = -1*total_withdraw;
+
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void SortBalanceHistory()
+  {
+   CJAVal tmp(NULL,jtUNDEF);
+   double balance=0;
+
+   for(int iBalance1=0; iBalance1<(balanceHistory.Size()-1); iBalance1++)
+     {
+      for(int iBalance2=iBalance1+1; iBalance2<balanceHistory.Size(); iBalance2++)
+        {
+         if(balanceHistory[iBalance1]["time"].ToStr() > balanceHistory[iBalance2]["time"].ToStr())
+           {
+            tmp                       = balanceHistory[iBalance1];
+            balanceHistory[iBalance1] = balanceHistory[iBalance2];
+            balanceHistory[iBalance2] = tmp;
+           }
+        }
+     }
+
+//-- update the balance
+   for(int iBalance1=0; iBalance1<balanceHistory.Size(); iBalance1++)
+     {
+      balance = balance + balanceHistory[iBalance1]["variation"].ToDbl();
+      balanceHistory[iBalance1]["balance"] = balance;
+     }
 
   }
 //+------------------------------------------------------------------+
@@ -526,7 +561,7 @@ CJAVal CreateTradeObjectJson(const string order_id,const string symbol,const dou
                              const double tp_level,const datetime open_time,const datetime closed_time,const double commission,const double rollover,const double other_fees
                             )
   {
-   CJAVal parser(NULL,jtUNDEF);
+   CJAVal tradeObject(NULL,jtUNDEF);
    double spread_cost = SymbolInfoInteger(symbol,SYMBOL_SPREAD)*Point*SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_VALUE)*lotsize;
 
    string dir = "SELL";
@@ -540,34 +575,34 @@ CJAVal CreateTradeObjectJson(const string order_id,const string symbol,const dou
       if(order_type==OP_BUYSTOP || order_type==OP_SELLSTOP)
          type = "STOP";
 
-   parser["trade_id_from_provider"]       = order_id;
-   parser["account_id"]                   = AccountID;
-   parser["instrument_id_from_provider"]  = symbol;
-   parser["direction"]                    = dir;
-   parser["type"]                         = order_type<=OP_SELL?"MARKET":type;
-   parser["units"]                        = lotsize;
-   parser["currency"]                     = SymbolInfoString(symbol,SYMBOL_CURRENCY_BASE);
-   parser["open_price"]                   = open_price;
-   parser["closed_price"]                 = closed_time>0 ? closed_price : 0;
-   parser["profit_loss"]                  = closed_time>0 ? PnL : 0.0;
-   parser["open_profit_loss"]             = closed_time>0 ? 0 : PnL;
-   parser["rollover"]                     = rollover;
-   parser["commission"]                   = commission;
-   parser["other_fees"]                   = other_fees;
-   parser["spread_cost"]                  = spread_cost;
-   parser["status"]                       = closed_time>0?(order_type>OP_SELL?"CANCELLED":"CLOSED"):"OPEN";
-   parser["balance_at_opening"]           = balanceSearch(dateToGMT(open_time)); //AccountBalance()-PnL;
-   parser["stop_loss"]                    = sl_level;
-   parser["take_profit"]                  = tp_level;
-   parser["trailing_stop"]                = 0;
-   parser["stop_loss_distance"]           = 0;
-   parser["take_profit_distance"]         = 0;
-   parser["trailing_stop_distance"]       = 0;
-   parser["created_at_from_provider"]     = dateToGMT(open_time);
-   parser["closed_at_from_provider"]      = dateToGMT(closed_time);
-   parser["current_time"]                 = dateToGMT(TimeCurrent());
+   tradeObject["trade_id_from_provider"]       = order_id;
+   tradeObject["account_id"]                   = AccountID;
+   tradeObject["instrument_id_from_provider"]  = symbol;
+   tradeObject["direction"]                    = dir;
+   tradeObject["type"]                         = order_type<=OP_SELL?"MARKET":type;
+   tradeObject["units"]                        = lotsize;
+   tradeObject["currency"]                     = SymbolInfoString(symbol,SYMBOL_CURRENCY_BASE);
+   tradeObject["open_price"]                   = open_price;
+   tradeObject["closed_price"]                 = closed_time>0 ? closed_price : 0;
+   tradeObject["profit_loss"]                  = closed_time>0 ? PnL : 0.0;
+   tradeObject["open_profit_loss"]             = closed_time>0 ? 0 : PnL;
+   tradeObject["rollover"]                     = rollover;
+   tradeObject["commission"]                   = commission;
+   tradeObject["other_fees"]                   = other_fees;
+   tradeObject["spread_cost"]                  = spread_cost;
+   tradeObject["status"]                       = closed_time>0?(order_type>OP_SELL?"CANCELLED":"CLOSED"):"OPEN";
+   tradeObject["balance_at_opening"]           = balanceSearch(dateToGMT(open_time)); //AccountBalance()-PnL;
+   tradeObject["stop_loss"]                    = sl_level;
+   tradeObject["take_profit"]                  = tp_level;
+   tradeObject["trailing_stop"]                = 0;
+   tradeObject["stop_loss_distance"]           = 0;
+   tradeObject["take_profit_distance"]         = 0;
+   tradeObject["trailing_stop_distance"]       = 0;
+   tradeObject["created_at_from_provider"]     = dateToGMT(open_time);
+   tradeObject["closed_at_from_provider"]      = dateToGMT(closed_time);
+   tradeObject["current_time"]                 = dateToGMT(TimeCurrent());
 
-   return(parser);
+   return(tradeObject);
   }
 //+------------------------------------------------------------------+
 //| Create currently opened order list                               |
@@ -582,17 +617,18 @@ CJAVal CreateOpenedOrderListJson()
    parser["delete_data_not_in_list"] = true;
    parser["date"]                    = dateToGMT(TimeCurrent());
 
-   for(int i=OrdersTotal()-1; i>=0; i--)
-     {
-      if(!OrderSelect(i,SELECT_BY_POS))
-         continue;
-      if(OrderType()<=OP_SELL)
-         continue;
+   if(OrdersTotal()>0)
+      for(int i=OrdersTotal()-1; i>=0; i--)
+        {
+         if(!OrderSelect(i,SELECT_BY_POS))
+            continue;
+         if(OrderType()<=OP_SELL)
+            continue;
 
-      units=OrderLots()*MarketInfo(OrderSymbol(), MODE_LOTSIZE);
+         units=OrderLots()*MarketInfo(OrderSymbol(), MODE_LOTSIZE);
 
-      parser["data"][j++]=CreateOrderObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),OrderExpiration(),OrderOpenTime(),OrderCloseTime());
-     }
+         parser["data"][j++]=CreateOrderObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),OrderExpiration(),OrderOpenTime(),OrderCloseTime());
+        }
 
    if(j==0)
       parser["data"] = "";
@@ -615,29 +651,35 @@ CJAVal CreateTradesListJson(const bool firstRun)
    int j = 0;
 
 //Open Positions
-   for(int i=OrdersTotal()-1; i>=0; i--)
+   Comment("List open positions!");
+   if(OrdersTotal()>0)
      {
-      if(!OrderSelect(i,SELECT_BY_POS))
-         continue;
-      if(OrderType()>OP_SELL)
-         continue;
+      for(int i=OrdersTotal()-1; i>=0; i--)
+        {
+         if(!OrderSelect(i,SELECT_BY_POS))
+            continue;
+         if(OrderType()>OP_SELL)
+            continue;
 
-      units               = OrderLots()*MarketInfo(OrderSymbol(), MODE_LOTSIZE);
-      parser["data"][j++] = CreateTradeObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),OrderClosePrice(),OrderProfit(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),
-                            OrderOpenTime(),OrderCloseTime(),OrderCommission(),OrderSwap(),0);
+         units               = OrderLots()*MarketInfo(OrderSymbol(), MODE_LOTSIZE);
+         parser["data"][j++] = CreateTradeObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),OrderClosePrice(),OrderProfit(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),
+                               OrderOpenTime(),OrderCloseTime(),OrderCommission(),OrderSwap(),0);
+        }
      }
-
 //Closed Positions
-   for(int i=OrdersHistoryTotal()-1; i>=0; i--)
+   if(OrdersHistoryTotal()>0)
      {
-      if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
-         continue;
-      if(OrderSymbol()=="" || OrderSymbol()==NULL || (!firstRun && OrderCloseTime()<yesterday))
-         continue;
+      for(int i=OrdersHistoryTotal()-1; i>=0; i--)
+        {
+         if(!OrderSelect(i,SELECT_BY_POS,MODE_HISTORY))
+            continue;
+         if(OrderSymbol()=="" || OrderSymbol()==NULL || (!firstRun && OrderCloseTime()<yesterday))
+            continue;
 
-      units               = OrderLots()*MarketInfo(OrderSymbol(), MODE_LOTSIZE);
-      parser["data"][j++] = CreateTradeObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),OrderClosePrice(),OrderProfit(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),
-                            OrderOpenTime(),OrderCloseTime(),OrderCommission(),OrderSwap(),0);
+         units               = OrderLots()*MarketInfo(OrderSymbol(), MODE_LOTSIZE);
+         parser["data"][j++] = CreateTradeObjectJson((string)OrderTicket(),OrderSymbol(),units,OrderOpenPrice(),OrderClosePrice(),OrderProfit(),(ENUM_ORDER_TYPE)OrderType(),OrderStopLoss(),OrderTakeProfit(),
+                               OrderOpenTime(),OrderCloseTime(),OrderCommission(),OrderSwap(),0);
+        }
      }
 
    if(j==0)
@@ -651,13 +693,13 @@ CJAVal CreateTradesListJson(const bool firstRun)
 //+------------------------------------------------------------------+
 double balanceSearch(string date)
   {
-   int i;
+   int i=0;
+
    for(i=0; i<balanceHistory.Size(); i++)
-     {
-      if(balanceHistory[i]["time"].ToStr()>date)
+      if(balanceHistory[i]["time"].ToStr()>=date)
          break;
-     }
-   return balanceHistory[i-1]["balance"].ToDbl();
+
+   return balanceHistory[i]["balance"].ToDbl();
   }
 //+------------------------------------------------------------------+
 //| Convert the date to GMT                                          |
